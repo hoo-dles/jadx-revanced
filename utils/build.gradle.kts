@@ -1,0 +1,61 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    alias(libs.plugins.kotlin)
+    alias(libs.plugins.shadow)
+}
+
+val friends = configurations.create("friends") {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+    isTransitive = false
+}
+
+// Make sure friends libraries are on the classpath
+configurations.findByName("implementation")?.extendsFrom(friends)
+
+// Make these libraries friends :)
+tasks.withType<KotlinCompile>().configureEach {
+    friendPaths.from(friends.incoming.artifactView { }.files)
+}
+kotlin {
+    compilerOptions {
+        freeCompilerArgs = listOf("-Xcontext-receivers")
+    }
+}
+dependencies {
+    friends(libs.revanced.patcher)
+}
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
+    }
+}
+java {
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+tasks.shadowJar {
+//    minimize {
+//        exclude(dependency("org.bouncycastle:.*"))
+//        exclude(dependency("app.revanced:revanced-patcher"))
+//    }
+    archiveBaseName.set("utils-shadow")
+    archiveClassifier.set("")
+    archiveVersion.set("")
+    mergeServiceFiles()
+}
+
+tasks.register<Copy>("copyJarToApp") {
+    dependsOn(tasks.named("shadowJar"))
+
+    from("${layout.buildDirectory}/libs/utils-shadow.jar")
+    //Module app /libs
+    into("${project.rootDir}/app/libs")
+
+}
+
+tasks.named("build") {
+    finalizedBy("copyJarToApp")
+}
