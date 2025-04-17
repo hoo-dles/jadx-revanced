@@ -21,7 +21,6 @@ dependencies {
     implementation(libs.bundles.scripting)
 
     api(libs.bundles.revanced)
-    implementation(libs.xpp3)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

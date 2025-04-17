@@ -4,8 +4,10 @@ import app.revanced.patcher.Fingerprint
 import com.android.tools.smali.dexlib2.analysis.reflection.util.ReflectionUtils
 import com.formdev.flatlaf.extras.FlatSVGIcon
 import io.github.oshai.kotlinlogging.KotlinLogging
+import jadx.api.JavaClass
 import jadx.api.plugins.JadxPluginContext
 import jadx.api.plugins.gui.JadxGuiContext
+import jadx.core.dex.nodes.ClassNode
 import jadx.gui.ui.MainWindow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -20,19 +22,8 @@ import java.awt.event.ActionEvent
 import java.io.ByteArrayInputStream
 import java.lang.reflect.Field
 import java.nio.charset.StandardCharsets
-import javax.swing.BorderFactory
-import javax.swing.Box
-import javax.swing.BoxLayout
-import javax.swing.Icon
-import javax.swing.JButton
-import javax.swing.JFrame
-import javax.swing.JLabel
-import javax.swing.JOptionPane
-import javax.swing.JPanel
-import javax.swing.JScrollPane
-import javax.swing.JTextArea
-import javax.swing.JToolBar
-import javax.swing.SwingUtilities
+import java.util.function.Function
+import javax.swing.*
 import kotlin.script.experimental.api.EvaluationResult
 import kotlin.script.experimental.api.ResultValue
 import kotlin.script.experimental.api.ResultWithDiagnostics
@@ -307,25 +298,46 @@ object RevancedFingerprintPluginUi {
                                             val searchResult = RevancedResolver.searchFingerprint(resolvedFingerprint)
                                             if (searchResult != null) {
                                                 outputBuilder.appendLine("Fingerprint found in APK: ${searchResult.definingClass}")
-                                                context.decompiler.searchJavaClassByOrigFullName(
+                                                outputBuilder.appendLine(
+                                                    "originalFullName: ${
+                                                        ReflectionUtils.dexToJavaName(
+                                                            searchResult.definingClass
+                                                        ).replace("$", ".")
+                                                    }"
+                                                )
+                                                outputBuilder.appendLine("shortId: ${searchResult.getShortId()}")
+                                                val javaKlass = context.decompiler.searchJavaClassByOrigFullName(
                                                     ReflectionUtils.dexToJavaName(
                                                         searchResult.definingClass
-                                                    )
-                                                )?.searchMethodByShortId(searchResult.getShortId())
-                                                    ?.let { sourceMethod ->
-                                                        val searchResultMsg =
-                                                            "Fingerprint found at method: ${sourceMethod.fullName}"
-                                                        outputBuilder.appendLine(searchResultMsg)
+                                                    ).replace("$", ".") // Make sure subclass $ is replaced with dot TODO: this might error if the class name has a $ but what can you do
+                                                )
+                                                outputBuilder.appendLine("javaKlass: $javaKlass")
+                                                val fgMethod =
+                                                    javaKlass?.searchMethodByShortId(searchResult.getShortId())
+                                                outputBuilder.appendLine("fgMethod: $fgMethod")
 
-                                                        resultComponents.add(createWrappedTextArea(searchResultMsg))
-                                                        ScriptEvaluation.LOG.info { searchResultMsg }
-                                                        val jumpButton = JButton("Jump to method")
-                                                        jumpButton.addActionListener {
-                                                            ScriptEvaluation.LOG.info { "Jumping to method: ${sourceMethod.fullName}" }
-                                                            guiContext.open(sourceMethod.codeNodeRef)
+                                                fgMethod?.let { sourceMethod ->
+                                                    val searchResultMsg =
+                                                        "Fingerprint found at method: ${sourceMethod.fullName}"
+                                                    outputBuilder.appendLine(searchResultMsg)
+
+                                                    resultComponents.add(createWrappedTextArea(searchResultMsg))
+                                                    ScriptEvaluation.LOG.info { searchResultMsg }
+                                                    val jumpButton = JButton("Jump to method")
+                                                    jumpButton.addActionListener {
+                                                        ScriptEvaluation.LOG.info { "Jumping to method: ${sourceMethod.fullName}" }
+                                                        val success = guiContext.open(sourceMethod.codeNodeRef)
+                                                        if (success) {
+                                                            ScriptEvaluation.LOG.info { "Jumped to method: ${sourceMethod.fullName}" }
+                                                        } else {
+                                                            ScriptEvaluation.LOG.error { "Failed to jump to method: ${sourceMethod.fullName}" }
+                                                            resultComponents.add(
+                                                                createWrappedTextArea("Failed to jump to method do it manually or something: ${sourceMethod.fullName}")
+                                                            )
                                                         }
-                                                        resultComponents.add(jumpButton)
                                                     }
+                                                    resultComponents.add(jumpButton)
+                                                }
 
 
                                             } else {
@@ -358,6 +370,7 @@ object RevancedFingerprintPluginUi {
                             }
 //                            resultContentBox.add(createWrappedTextArea(outputBuilder.toString()))
                         }
+                        ScriptEvaluation.LOG.info { "Script evaluation output:\n ${outputBuilder.toString()}" }
 
 
                         resultLabel.text = "Executed in ${executionTime.inWholeMilliseconds.milliseconds}"
@@ -377,7 +390,19 @@ object RevancedFingerprintPluginUi {
 
 
     }
+    fun dumpClasses() {
+         context.decompiler.getRoot().getClasses().forEach{
+             val classInfo = it.classInfo
+            LOG.info { "package: ${classInfo.`package`}" }
+            LOG.info { "isInner: ${classInfo.isInner}" }
+            LOG.info { "type: ${classInfo.type}" }
+            LOG.info { "parentClass: ${classInfo.parentClass}" }
+            LOG.info { "fullName: ${classInfo.fullName}" }
+            LOG.info { "rawName: ${classInfo.rawName}" }
+            LOG.info { "aliasFullName: ${classInfo.aliasFullName}" }
 
+         }
+    }
     fun createWrappedTextArea(text: String): JTextArea {
         val textArea = JTextArea(text)
         textArea.lineWrap = true
