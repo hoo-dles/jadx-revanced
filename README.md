@@ -4,6 +4,7 @@ Run ./gradlew app:dist to build the plugin then in app/build/dist you find the j
 
 You need the github token for accessing the revanced-patcher repo
 
+Also sometimes shadowJar decides to not bundle everything and the plugin randomly fails for missing classes or methods, compile size should be around 100Mb
 
 The utils module has nothing its just testing
 
