@@ -3,6 +3,7 @@ package com.valonso.jadx.fingerprinting
 import com.android.tools.smali.dexlib2.analysis.reflection.util.ReflectionUtils
 import com.valonso.jadx.fingerprinting.RevancedFingerprintPluginUi.inlineSvgIcon
 import com.valonso.jadx.fingerprinting.RevancedFingerprintPluginUi.showScriptPanel
+import com.valonso.jadx.fingerprinting.solver.Solver
 import jadx.api.plugins.JadxPlugin
 import jadx.api.plugins.JadxPluginContext
 import jadx.api.plugins.JadxPluginInfo
@@ -11,6 +12,8 @@ import java.io.File
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jadx.gui.utils.UiUtils
+import lanchon.multidexlib2.BasicDexFileNamer
+import lanchon.multidexlib2.MultiDexIO
 
 class RevancedFingerprintPlugin : JadxPlugin {
     companion object {
@@ -41,6 +44,18 @@ class RevancedFingerprintPlugin : JadxPlugin {
         }
         RevancedResolver.createPatcher(sourceApk, this.context.files().pluginTempDir.toFile())
 
+        MultiDexIO.readDexFile(
+            true,
+            sourceApk,
+            BasicDexFileNamer(),
+            null,
+            null,
+        ).classes.flatMap { classDef ->
+            classDef.methods
+        }.let { allMethods ->
+            Solver.setMethods(allMethods)
+        }
+
         LOG.info { "Revanced fingerprint plugin is enabled" }
         this.context.guiContext?.let {
 
@@ -53,5 +68,4 @@ fun main() {
     println(ReflectionUtils.dexToJavaName("Lcom/datatheorem/android/trustkit/config/DomainPinningPolicy;"))
 //    RevancedResolver.createPatcher(File("test.apk"), File("build"))
 //    showScriptPanel()
-
 }

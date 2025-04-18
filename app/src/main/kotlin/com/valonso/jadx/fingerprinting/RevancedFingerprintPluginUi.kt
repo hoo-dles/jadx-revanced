@@ -3,11 +3,14 @@ package com.valonso.jadx.fingerprinting
 import app.revanced.patcher.Fingerprint
 import com.android.tools.smali.dexlib2.analysis.reflection.util.ReflectionUtils
 import com.formdev.flatlaf.extras.FlatSVGIcon
+import com.valonso.jadx.fingerprinting.solver.Solver
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jadx.api.JavaClass
+import jadx.api.metadata.ICodeNodeRef
 import jadx.api.plugins.JadxPluginContext
 import jadx.api.plugins.gui.JadxGuiContext
 import jadx.core.dex.nodes.ClassNode
+import jadx.core.dex.nodes.MethodNode
 import jadx.gui.ui.MainWindow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -55,6 +58,7 @@ object RevancedFingerprintPluginUi {
                 //Remove all frames with the title "Revanced Script Evaluator"
                 JFrame.getFrames().filter { it.title == frameName }.forEach { it.dispose() }
                 addToolbarButton()
+                addCopyFingerprintAction()
             } catch (e: Exception) {
                 LOG.error(e) { "Failed to initialize UI" }
                 JOptionPane.showMessageDialog(
@@ -65,6 +69,56 @@ object RevancedFingerprintPluginUi {
                 )
             }
         }
+    }
+
+    fun isCopyFingerprintActionEnabled(codeNodeRef: ICodeNodeRef): Boolean {
+        return codeNodeRef is MethodNode
+    }
+
+    fun copyFingerprintAction(codeNodeRef: ICodeNodeRef) {
+        // Check if it's a method
+        try {
+            val methodNode = codeNodeRef as MethodNode
+            val methodInfo = methodNode.methodInfo
+            LOG.info { "Copying fingerprint for method: ${methodInfo.shortId}" }
+            LOG.info { "Info about parent class: ${methodNode.parentClass}" }
+            LOG.info { methodNode.parentClass.classInfo.shortName }
+            LOG.info { methodNode.parentClass.classInfo.aliasFullName }
+            LOG.info { methodNode.parentClass.classInfo.aliasFullPath}
+            LOG.info { ReflectionUtils.javaToDexName(methodNode.parentClass.rawName) }
+            val uniqueMethodId = "${ReflectionUtils.javaToDexName(methodNode.parentClass.rawName)}${methodInfo.shortId}"
+            try {
+                val features = Solver.getMinimalDistinguishingFeatures(uniqueMethodId)
+                val fingerprintString = Solver.featuresToFingerprintString(features)
+                LOG.info { "Created Fingerprint: $fingerprintString" }
+                guiContext.copyToClipboard(fingerprintString)
+            } catch (e: Exception) {
+                LOG.error(e) { "Failed to create fingerprint" }
+                JOptionPane.showMessageDialog(
+                    guiContext.mainFrame,
+                    "Failed to create fingerprint: ${e.message}",
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE
+                )
+            }
+        } catch (e: Exception) {
+            LOG.error(e) { "Failed to copy fingerprint" }
+            JOptionPane.showMessageDialog(
+                guiContext.mainFrame,
+                "Failed to copy fingerprint: ${e.message}",
+                "Error",
+                JOptionPane.ERROR_MESSAGE
+            )
+        }
+    }
+
+    fun addCopyFingerprintAction() {
+        guiContext.addPopupMenuAction(
+            "Copy Revanced fingerprint",
+            ::isCopyFingerprintActionEnabled,
+            "R",
+            ::copyFingerprintAction
+        )
     }
 
     private fun addToolbarButton() {
@@ -96,7 +150,7 @@ object RevancedFingerprintPluginUi {
 
             val toolbar = northPanel
             val scriptButtonName = "${RevancedFingerprintPlugin.ID}.button"
-            // Re initialize the plugin button since if not there are classpath shenanigans
+            // Re-initialize the plugin button since if not there are classpath shenanigans
             toolbar.components.find { it.name == scriptButtonName }?.let {
                 LOG.info { "Removing existing button from toolbar." }
                 toolbar.remove(it)
@@ -309,7 +363,10 @@ object RevancedFingerprintPluginUi {
                                                 val javaKlass = context.decompiler.searchJavaClassByOrigFullName(
                                                     ReflectionUtils.dexToJavaName(
                                                         searchResult.definingClass
-                                                    ).replace("$", ".") // Make sure subclass $ is replaced with dot TODO: this might error if the class name has a $ but what can you do
+                                                    ).replace(
+                                                        "$",
+                                                        "."
+                                                    ) // Make sure subclass $ is replaced with dot TODO: this might error if the class name has a $ but what can you do
                                                 )
                                                 outputBuilder.appendLine("javaKlass: $javaKlass")
                                                 val fgMethod =
@@ -390,9 +447,10 @@ object RevancedFingerprintPluginUi {
 
 
     }
+
     fun dumpClasses() {
-         context.decompiler.getRoot().getClasses().forEach{
-             val classInfo = it.classInfo
+        context.decompiler.getRoot().getClasses().forEach {
+            val classInfo = it.classInfo
             LOG.info { "package: ${classInfo.`package`}" }
             LOG.info { "isInner: ${classInfo.isInner}" }
             LOG.info { "type: ${classInfo.type}" }
@@ -401,8 +459,9 @@ object RevancedFingerprintPluginUi {
             LOG.info { "rawName: ${classInfo.rawName}" }
             LOG.info { "aliasFullName: ${classInfo.aliasFullName}" }
 
-         }
+        }
     }
+
     fun createWrappedTextArea(text: String): JTextArea {
         val textArea = JTextArea(text)
         textArea.lineWrap = true

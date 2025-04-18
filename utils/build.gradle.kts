@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlin)
     alias(libs.plugins.shadow)
+    kotlin("plugin.serialization") version "2.1.20"
 }
 
 val friends = configurations.create("friends") {
@@ -25,7 +26,8 @@ kotlin {
     }
 }
 dependencies {
-    friends(libs.revanced.patcher)
+    api(libs.bundles.revanced)
+    implementation(libs.kotlinx.serialization.json)
 }
 kotlin {
     compilerOptions {
