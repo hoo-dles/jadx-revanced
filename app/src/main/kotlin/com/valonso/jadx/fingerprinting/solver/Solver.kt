@@ -79,8 +79,9 @@ object Solver {
         // Greedy set cover
         val uncovered = otherMethodIds.toMutableSet()
         val selectedFeatures = mutableListOf<String>()
-
+        var iteration = 0
         while (uncovered.isNotEmpty()) {
+            LOG.info { "There are ${uncovered.size} uncovered methods, iteration $iteration" }
             // Find features that cover at least one uncovered method and calculate how many *uncovered* methods they cover
             val eligibleFeaturesCoverage = coverage
                 .mapValues { (_, coveringSet) -> coveringSet.intersect(uncovered) } // Intersect with current uncovered
@@ -92,7 +93,13 @@ object Solver {
                 uncovered.forEach { id ->
                     LOG.error { " - $id" }
                 }
-                throw IllegalStateException("Could not distinguish target method from ${uncovered.size} other methods with a simple fingerprint.")
+                throw IllegalStateException(
+                    "Could not distinguish target method from ${uncovered.size} other methods with a simple fingerprint. \n${
+                        featuresToFingerprintString(
+                            selectedFeatures
+                        )
+                    }"
+                )
             }
 
             // Pick feature that covers the most *remaining* uncovered methods
@@ -101,24 +108,28 @@ object Solver {
 
             val newlyCovered = eligibleFeaturesCoverage[bestFeature]!! // Safe due to prior checks
 
-            // LOG.info { "Selected feature '$bestFeature', covers ${newlyCovered.size} methods: $newlyCovered" } // Debug print
+            LOG.info { "Selected feature '$bestFeature', covers ${newlyCovered.size} methods" } // Debug print
 
             selectedFeatures.add(bestFeature)
             uncovered.removeAll(newlyCovered)
-
+            iteration++
             // Optional: Remove the chosen feature from consideration for the next round
             // coverage.remove(bestFeature)
         }
+
+        LOG.info { "Selected features: $selectedFeatures" }
 
         return selectedFeatures
     }
 
 
     fun featuresToFingerprintString(featureList: List<String>): String {
+        LOG.info { "Converting features to fingerprint string: $featureList" }
+
         val fingerprintString = StringBuilder("fingerprint {")
         val fingerprintParts = mutableListOf<String>()
         val strings = mutableListOf<String>()
-        val parameters = mutableListOf<String>()
+        val parametersMap = mutableMapOf<Int, String>()
         featureList.forEach { feature ->
             val parts = feature.split("|", limit = 2)
             if (parts.size != 2) {
@@ -148,7 +159,7 @@ object Solver {
                         val indexStr = featureName.substringAfter("parameter_")
                         val index = indexStr.toIntOrNull()
                         if (index != null) {
-                            parameters.add(featureValue)
+                            parametersMap[index] = featureValue
                         } else {
                             LOG.error { "Invalid parameter index in feature: $featureName" }
                         }
@@ -158,31 +169,41 @@ object Solver {
                 }
             }
         }
-        StringBuilder().takeIf { fingerprintParts.isNotEmpty() }?.let {
-            it.append("parameters(")
-            parameters.joinToString(", ") { param ->
-                "\"$param\""
-            }.let { paramList ->
-                it.append(paramList)
+        parametersMap.takeIf { it.isNotEmpty() }?.let { map ->
+            val maxIndex = map.keys.maxOrNull() ?: -1
+            val parametersList = MutableList(maxIndex + 1) { "" } // Initialize with empty strings
+            map.forEach { (index, value) ->
+                parametersList[index] = value // Fill in the values from the map
             }
-            it.append(")")
-            fingerprintParts.add(it.toString())
+
+            StringBuilder().let { builder ->
+                builder.append("parameters(")
+                parametersList.joinToString(", ") { param ->
+                    "\"$param\"" // Quote each parameter, including empty ones
+                }.let { paramList ->
+                    builder.append(paramList)
+                }
+                builder.append(")")
+                fingerprintParts.add(builder.toString())
+            }
         }
-        StringBuilder().takeIf { strings.isNotEmpty() }?.let {
-            it.append("strings(")
-            strings.joinToString(", ") { str ->
-                "\"$str\""
-            }.let { strList ->
-                it.append(strList)
+
+        strings.takeIf { it.isNotEmpty() }?.let { strings ->
+            StringBuilder().let { builder ->
+                builder.append("strings(")
+                strings.joinToString(", ") { str ->
+                    "\"$str\""
+                }.let { strList ->
+                    builder.append(strList)
+                }
+                builder.append(")")
+                fingerprintParts.add(builder.toString())
             }
-
-
-            it.append(")")
-            fingerprintParts.add(it.toString())
         }
 
         fingerprintParts.joinToString("\n\t", prefix = "\n\t", postfix = "\n") { it }.let { parts ->
             fingerprintString.append(parts)
+            LOG.info { "Fingerprint string part: $parts" }
         }
         fingerprintString.append("}")
 
