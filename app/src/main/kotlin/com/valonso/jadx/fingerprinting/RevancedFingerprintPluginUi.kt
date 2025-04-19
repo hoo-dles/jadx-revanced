@@ -9,6 +9,7 @@ import jadx.api.JavaClass
 import jadx.api.metadata.ICodeNodeRef
 import jadx.api.plugins.JadxPluginContext
 import jadx.api.plugins.gui.JadxGuiContext
+import jadx.core.dex.info.MethodInfo
 import jadx.core.dex.nodes.ClassNode
 import jadx.core.dex.nodes.MethodNode
 import jadx.gui.ui.MainWindow
@@ -20,6 +21,9 @@ import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.FlowLayout
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
 import java.awt.Insets
 import java.awt.event.ActionEvent
 import java.io.ByteArrayInputStream
@@ -47,8 +51,12 @@ object RevancedFingerprintPluginUi {
     val playArrowSvg = """
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><!-- Icon from Material Symbols by Google - https://github.com/google/material-design-icons/blob/master/LICENSE --><path fill="currentColor" d="M8 19V5l11 7z"/></svg>
     """.trimIndent()
+    val contentCopySvg = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Material Symbols by Google - https://github.com/google/material-design-icons/blob/master/LICENSE --><path fill="currentColor" d="M9 18q-.825 0-1.412-.587T7 16V4q0-.825.588-1.412T9 2h9q.825 0 1.413.588T20 4v12q0 .825-.587 1.413T18 18zm-4 4q-.825 0-1.412-.587T3 20V6h2v14h11v2z"/></svg>
+    """.trimIndent()
     private val frameName = "Revanced Fingerprint Evaluator"
     private var fingerprintEvalFrame: JFrame? = null
+    private val minimalSetsFrameName = "Fingerprinting Results"
 
     fun init(context: JadxPluginContext) {
         this.context = context
@@ -57,6 +65,7 @@ object RevancedFingerprintPluginUi {
             try {
                 //Remove all frames with the title "Revanced Script Evaluator"
                 JFrame.getFrames().filter { it.title == frameName }.forEach { it.dispose() }
+                JFrame.getFrames().filter { it.title == minimalSetsFrameName }.forEach { it.dispose() }
                 addToolbarButton()
                 addCopyFingerprintAction()
             } catch (e: Exception) {
@@ -76,41 +85,198 @@ object RevancedFingerprintPluginUi {
     }
 
     fun copyFingerprintAction(codeNodeRef: ICodeNodeRef) {
-        // Check if it's a method
         try {
             val methodNode = codeNodeRef as MethodNode
             val methodInfo = methodNode.methodInfo
-            LOG.info { "Copying fingerprint for method: ${methodInfo.shortId}" }
-            LOG.info { "Info about parent class: ${methodNode.parentClass}" }
-            LOG.info { methodNode.parentClass.classInfo.shortName }
-            LOG.info { methodNode.parentClass.classInfo.aliasFullName }
-            LOG.info { methodNode.parentClass.classInfo.aliasFullPath}
-            LOG.info { ReflectionUtils.javaToDexName(methodNode.parentClass.rawName) }
+            LOG.info { "Generating fingerprints for method: ${methodInfo.shortId}" }
             val uniqueMethodId = "${ReflectionUtils.javaToDexName(methodNode.parentClass.rawName)}${methodInfo.shortId}"
             try {
-                val features = Solver.getMinimalDistinguishingFeatures(uniqueMethodId)
-                val fingerprintString = Solver.featuresToFingerprintString(features)
-                LOG.info { "Created Fingerprint: $fingerprintString" }
-                guiContext.copyToClipboard(fingerprintString)
-            } catch (e: Exception) {
-                LOG.error(e) { "Failed to create fingerprint" }
+                val minimalSets = Solver.getMinimalDistinguishingFeatures(uniqueMethodId)
+                if (minimalSets.isEmpty()) {
+                    LOG.warn { "No feature sets found for method $uniqueMethodId" }
+                    JOptionPane.showMessageDialog(
+                        guiContext.mainFrame,
+                        "Could not find any distinguishing feature sets for this method.",
+                        "No Sets Found",
+                        JOptionPane.WARNING_MESSAGE
+                    )
+                    return
+                }
+                // Show the window with all minimal sets
+                showMinimalSetsWindow(minimalSets, methodNode)
+
+            } catch (e: IllegalStateException) {
+                LOG.error(e) { "Failed to find feature sets for $uniqueMethodId" }
                 JOptionPane.showMessageDialog(
                     guiContext.mainFrame,
-                    "Failed to create fingerprint: ${e.message}",
+                    "Failed to generate fingerprints: ${e.message}",
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE
+                )
+            } catch (e: Exception) {
+                LOG.error(e) { "Failed during fingerprint generation or display for $uniqueMethodId" }
+                JOptionPane.showMessageDialog(
+                    guiContext.mainFrame,
+                    "An unexpected error occurred: ${e.message}",
                     "Error",
                     JOptionPane.ERROR_MESSAGE
                 )
             }
         } catch (e: Exception) {
-            LOG.error(e) { "Failed to copy fingerprint" }
+            LOG.error(e) { "Failed to process method node for fingerprinting" }
             JOptionPane.showMessageDialog(
                 guiContext.mainFrame,
-                "Failed to copy fingerprint: ${e.message}",
+                "Failed to get method details: ${e.message}",
                 "Error",
                 JOptionPane.ERROR_MESSAGE
             )
         }
     }
+
+    fun showMinimalSetsWindow(
+        minimalSets: List<List<String>>, methodNode: MethodNode
+    ) {
+        val methodShortId = methodNode.methodInfo.shortId
+        val uniqueMethodId = "${ReflectionUtils.javaToDexName(methodNode.parentClass.rawName)}${methodShortId}"
+        val methodFeatures = Solver.getMethodFeatures(uniqueMethodId)
+        val fullMethodFingerprint = Solver.featuresToFingerprintString(methodFeatures)
+        SwingUtilities.invokeLater {
+            // Close existing window if open
+            JFrame.getFrames().find { it.title == minimalSetsFrameName }?.dispose()
+
+            val frame = JFrame(minimalSetsFrameName)
+            frame.defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
+            frame.setSize(700, 500)
+            frame.setLocationRelativeTo(guiContext.mainFrame)
+
+
+            val mainPanel = JPanel(GridBagLayout()) // Changed layout
+            mainPanel.border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+
+            val gbc = GridBagConstraints()
+            gbc.gridx = 0 // All components in the first column
+            gbc.gridy = GridBagConstraints.RELATIVE // Place components below each other
+            gbc.weightx = 1.0 // Allow horizontal stretching
+            gbc.fill = GridBagConstraints.HORIZONTAL // Fill available horizontal space
+            gbc.anchor = GridBagConstraints.NORTHWEST // Anchor to top-left
+            gbc.insets = Insets(0, 0, 0, 0) // Default spacing
+
+
+            val titleLabel =
+                JTextArea("Found ${minimalSets.size} fingerprint(s) for method : ${uniqueMethodId}")
+            titleLabel.isEditable = false
+            titleLabel.lineWrap = true
+            titleLabel.wrapStyleWord = true
+            titleLabel.preferredSize = Dimension(0, 50)
+
+            gbc.insets = Insets(0, 0, 10, 0) // Add bottom margin
+            mainPanel.add(titleLabel, gbc)
+
+
+            val fullFingerprintPanel = JPanel(BorderLayout(5, 5))
+            fullFingerprintPanel.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Full Method Fingerprint | ${methodFeatures.size} feature(s) "),
+                BorderFactory.createEmptyBorder(5, 5, 5, 5)
+            )
+
+            val fullTextArea = JTextArea(fullMethodFingerprint)
+            fullTextArea.isEditable = false
+            fullTextArea.border = BorderFactory.createEmptyBorder(5, 5, 5, 5)
+            fullTextArea.tabSize = 2
+
+            val fullCopyButton = JButton(null, inlineSvgIcon(contentCopySvg))
+            fullCopyButton.toolTipText = "Copy the full method fingerprint to clipboard"
+            fullCopyButton.addActionListener {
+                try {
+                    guiContext.copyToClipboard(fullMethodFingerprint)
+                    LOG.info { "Copied full method fingerprint to clipboard." }
+                    fullCopyButton.isEnabled = false
+                    Timer(1500) {
+                        fullCopyButton.isEnabled = true
+                    }.apply { isRepeats = false }.start()
+                } catch (e: Exception) {
+                    LOG.error(e) { "Failed to copy full fingerprint string to clipboard" }
+                    JOptionPane.showMessageDialog(
+                        frame,
+                        "Failed to copy to clipboard: ${e.message}",
+                        "Copy Error",
+                        JOptionPane.ERROR_MESSAGE
+                    )
+                }
+            }
+
+            fullFingerprintPanel.add(fullTextArea, BorderLayout.CENTER)
+            fullFingerprintPanel.add(fullCopyButton, BorderLayout.EAST)
+
+            gbc.insets = Insets(0, 0, 15, 0)
+            mainPanel.add(fullFingerprintPanel, gbc)
+
+
+            mainPanel.add(Box.createRigidArea(Dimension(0, 15)))
+
+
+            minimalSets.forEachIndexed { index, featureSet ->
+                val fingerprintString = try {
+                    Solver.featuresToFingerprintString(featureSet)
+                } catch (e: Exception) {
+                    LOG.error(e) { "Failed to convert feature set to string: $featureSet" }
+                    "Error generating fingerprint string: ${e.message}"
+                }
+
+                val setPanel = JPanel(BorderLayout(5, 5)) // Panel for each set
+                setPanel.border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createTitledBorder("Fingeprint ${index + 1} | ${featureSet.size} feature(s) "),
+                    BorderFactory.createEmptyBorder(5, 5, 5, 5)
+                )
+
+                val textArea = JTextArea(fingerprintString)
+                textArea.isEditable = false
+                textArea.border = BorderFactory.createEmptyBorder(5, 5, 5, 5)
+                textArea.tabSize = 2
+
+                val copyButton = JButton(null, inlineSvgIcon(contentCopySvg))
+                copyButton.toolTipText = "Copy this fingerprint to clipboard"
+                copyButton.addActionListener {
+                    try {
+                        guiContext.copyToClipboard(fingerprintString)
+                        LOG.info { "Copied fingerprint set ${index + 1} to clipboard." }
+                        copyButton.isEnabled = false
+                        Timer(1500) {
+                            copyButton.isEnabled = true
+                        }.apply { isRepeats = false }.start()
+
+                    } catch (e: Exception) {
+                        LOG.error(e) { "Failed to copy fingerprint string to clipboard" }
+                        JOptionPane.showMessageDialog(
+                            frame,
+                            "Failed to copy to clipboard: ${e.message}",
+                            "Copy Error",
+                            JOptionPane.ERROR_MESSAGE
+                        )
+                    }
+                }
+
+                setPanel.add(textArea, BorderLayout.CENTER)
+                setPanel.add(copyButton, BorderLayout.EAST)
+
+                gbc.insets = Insets(0, 0, 10, 0)
+                mainPanel.add(setPanel, gbc)
+            }
+            gbc.weighty = 1.0
+            gbc.fill = GridBagConstraints.VERTICAL
+            mainPanel.add(Box.createVerticalGlue(), gbc)
+
+            val containerPanel = JPanel(BorderLayout())
+            containerPanel.add(mainPanel, BorderLayout.NORTH)
+
+            val scrollPane = JScrollPane(containerPanel)
+            scrollPane.verticalScrollBar.unitIncrement = 16
+
+            frame.contentPane.add(scrollPane)
+            frame.isVisible = true
+        }
+    }
+
 
     fun addCopyFingerprintAction() {
         guiContext.addPopupMenuAction(
@@ -228,9 +394,10 @@ object RevancedFingerprintPluginUi {
             resultHeaderPanel.border = BorderFactory.createEmptyBorder(0, 10, 10, 0) // Add padding
             val runButton = JButton(null, icon).apply {
                 toolTipText = "Run the script"
-                margin = Insets(0, 0, 0, 0)
+                margin = Insets(3, 3, 3, 3)
                 preferredSize = Dimension(icon.iconWidth, icon.iconHeight)
                 maximumSize = preferredSize
+                border = BorderFactory.createEmptyBorder(3, 3, 3, 3) // Remove default border
             }
 
             resultHeaderPanel.add(runButton, BorderLayout.WEST)
