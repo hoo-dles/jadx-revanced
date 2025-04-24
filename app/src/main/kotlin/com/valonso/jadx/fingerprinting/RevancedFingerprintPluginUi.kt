@@ -2,15 +2,13 @@ package com.valonso.jadx.fingerprinting
 
 import app.revanced.patcher.Fingerprint
 import com.android.tools.smali.dexlib2.analysis.reflection.util.ReflectionUtils
+import com.android.tools.smali.dexlib2.iface.Method
 import com.formdev.flatlaf.extras.FlatSVGIcon
 import com.valonso.jadx.fingerprinting.solver.Solver
 import io.github.oshai.kotlinlogging.KotlinLogging
-import jadx.api.JavaClass
 import jadx.api.metadata.ICodeNodeRef
 import jadx.api.plugins.JadxPluginContext
 import jadx.api.plugins.gui.JadxGuiContext
-import jadx.core.dex.info.MethodInfo
-import jadx.core.dex.nodes.ClassNode
 import jadx.core.dex.nodes.MethodNode
 import jadx.gui.ui.MainWindow
 import kotlinx.coroutines.Dispatchers
@@ -18,18 +16,10 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
-import java.awt.BorderLayout
-import java.awt.Component
-import java.awt.Dimension
-import java.awt.FlowLayout
-import java.awt.GridBagConstraints
-import java.awt.GridBagLayout
-import java.awt.Insets
-import java.awt.event.ActionEvent
+import java.awt.*
 import java.io.ByteArrayInputStream
 import java.lang.reflect.Field
 import java.nio.charset.StandardCharsets
-import java.util.function.Function
 import javax.swing.*
 import kotlin.script.experimental.api.EvaluationResult
 import kotlin.script.experimental.api.ResultValue
@@ -40,10 +30,12 @@ import kotlin.time.measureTime
 object RevancedFingerprintPluginUi {
 
     private val LOG = KotlinLogging.logger("${RevancedFingerprintPlugin.ID}/ui")
+    private var matchedMethods = linkedSetOf<Method>()
+    private var navigationIndex = 0
     private lateinit var context: JadxPluginContext
     private lateinit var guiContext: JadxGuiContext
 
-    val revancedSvg = """
+    private val revancedSvg = """
         <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" id="revanced" height="16" width="16">
             <path d="M5.1 0a0.28 0.28 0 0 0 -0.23 0.42l6.88 11.93a0.28 0.28 0 0 0 0.48 0L19.13 0.42A0.28 0.28 0 0 0 18.9 0ZM0.5 0a0.33 0.33 0 0 0 -0.3 0.46L10.43 23.8c0.05 0.12 0.17 0.2 0.3 0.2h2.54c0.13 0 0.25 -0.08 0.3 -0.2L23.8 0.46a0.33 0.33 0 0 0 -0.3 -0.46h-2.32a0.24 0.24 0 0 0 -0.21 0.14L12.2 20.08a0.23 0.23 0 0 1 -0.42 0L3.03 0.14A0.23 0.23 0 0 0 2.82 0Z" fill="#000000" stroke-width="1"></path>
         </svg>
@@ -51,12 +43,18 @@ object RevancedFingerprintPluginUi {
     val playArrowSvg = """
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><!-- Icon from Material Symbols by Google - https://github.com/google/material-design-icons/blob/master/LICENSE --><path fill="currentColor" d="M8 19V5l11 7z"/></svg>
     """.trimIndent()
-    val contentCopySvg = """
+    val nextArrowSvg = """
+        <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#1f1f1f"><path d="M647-440H160v-80h487L423-744l57-56 320 320-320 320-57-56 224-224Z"/></svg>
+    """.trimIndent()
+    val previousArrowSvg = """
+        <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#1f1f1f"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg>
+    """.trimIndent()
+    private val contentCopySvg = """
         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Material Symbols by Google - https://github.com/google/material-design-icons/blob/master/LICENSE --><path fill="currentColor" d="M9 18q-.825 0-1.412-.587T7 16V4q0-.825.588-1.412T9 2h9q.825 0 1.413.588T20 4v12q0 .825-.587 1.413T18 18zm-4 4q-.825 0-1.412-.587T3 20V6h2v14h11v2z"/></svg>
     """.trimIndent()
-    private val frameName = "Revanced Fingerprint Evaluator"
-    private var fingerprintEvalFrame: JFrame? = null
-    private val minimalSetsFrameName = "Fingerprinting Results"
+    const val frameName = "Revanced Fingerprint Evaluator"
+    var fingerprintEvalFrame: JFrame? = null
+    private const val minimalSetsFrameName = "Fingerprinting Results"
 
     fun init(context: JadxPluginContext) {
         this.context = context
@@ -361,7 +359,6 @@ object RevancedFingerprintPluginUi {
     }
 
     fun showScriptPanel() {
-
         SwingUtilities.invokeLater {
             val frame = JFrame(frameName)
             fingerprintEvalFrame = frame
@@ -388,23 +385,38 @@ object RevancedFingerprintPluginUi {
             }
             mainPanel.add(codePanel, BorderLayout.WEST)
 
-            val icon = inlineSvgIcon(playArrowSvg) as Icon
             val resultPanel = JPanel(BorderLayout())
-            val resultHeaderPanel = JPanel(BorderLayout())
+
+            val resultHeaderPanel = JPanel(GridLayout(2, 1, 10, 10))
             resultHeaderPanel.border = BorderFactory.createEmptyBorder(0, 10, 10, 0) // Add padding
-            val runButton = JButton(null, icon).apply {
-                toolTipText = "Run the script"
-                margin = Insets(3, 3, 3, 3)
-                preferredSize = Dimension(icon.iconWidth, icon.iconHeight)
-                maximumSize = preferredSize
-                border = BorderFactory.createEmptyBorder(3, 3, 3, 3) // Remove default border
+
+            val upPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+            val downPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+
+            fun defaultButton(tooltipText: String, icon: Icon): JButton {
+                return JButton(null, icon).apply {
+                    toolTipText = tooltipText
+                    margin = Insets(3, 3, 3, 3)
+                    preferredSize = Dimension(icon.iconWidth, icon.iconHeight)
+                    maximumSize = preferredSize
+                    border = BorderFactory.createEmptyBorder(3, 3, 3, 3)
+                }
             }
 
-            resultHeaderPanel.add(runButton, BorderLayout.WEST)
-            //add a label to the right
+            val runButton = defaultButton("Run the script", inlineSvgIcon(playArrowSvg) as Icon)
+            val nextButton = defaultButton("Search next", inlineSvgIcon(nextArrowSvg) as Icon).apply { isEnabled = false }
+            val previousButton = defaultButton("Search previous", inlineSvgIcon(previousArrowSvg) as Icon).apply { isEnabled = false }
+
             val resultLabel = JLabel("Fingerprint result")
             resultLabel.border = BorderFactory.createEmptyBorder(0, 10, 0, 0) // Add padding
-            resultHeaderPanel.add(resultLabel, BorderLayout.CENTER)
+
+            upPanel.add(runButton)
+            upPanel.add(resultLabel)
+
+            downPanel.add(previousButton)
+            downPanel.add(nextButton)
+            resultHeaderPanel.add(upPanel)
+            resultHeaderPanel.add(downPanel)
             resultPanel.add(resultHeaderPanel, BorderLayout.NORTH)
 
             val resultContentPanel = JPanel()
@@ -413,27 +425,22 @@ object RevancedFingerprintPluginUi {
             val resultContentBox = Box.createVerticalBox()
             resultContentPanel.add(resultContentBox, BorderLayout.PAGE_START)
 
-
-            val resultScrollPane = JScrollPane(
-                resultContentPanel
-            )
+            val resultScrollPane = JScrollPane(resultContentPanel)
             resultPanel.add(resultScrollPane, BorderLayout.CENTER)
             mainPanel.add(resultPanel, BorderLayout.CENTER)
 
-            runButton.addActionListener {
+            fun onButtonClick(statusText: String) {
                 runButton.isEnabled = false
+                nextButton.isEnabled = false
+                previousButton.isEnabled = false
                 resultContentBox.removeAll()
-                val statusLabel = JLabel("Evaluating...")
+                val statusLabel = JLabel(statusText)
                 statusLabel.alignmentX = Component.LEFT_ALIGNMENT
                 resultContentBox.add(statusLabel)
                 resultContentBox.revalidate()
                 resultContentBox.repaint()
-
-                // Get script text from CodePanel's CodeArea
                 val script = codePanel.getText()
-
-                // Launch evaluation in a background thread using Coroutines
-                GlobalScope.launch(Dispatchers.IO) { // Use Dispatchers.IO for blocking tasks
+                GlobalScope.launch(Dispatchers.IO) {
                     LOG.info { "Evaluating script: $script" }
                     var result: ResultWithDiagnostics<EvaluationResult>? = null
                     var evaluationError: Throwable? = null
@@ -451,11 +458,11 @@ object RevancedFingerprintPluginUi {
                     val outputBuilder = StringBuilder() // For logging or alternative display
 
                     if (evaluationError != null) {
-                        val errorMsg = "Evaluation failed: ${evaluationError.message}"
+                        val errorMsg = "Evaluation failed: ${evaluationError!!.message}"
                         resultComponents.add(createWrappedTextArea(errorMsg))
                         outputBuilder.appendLine(errorMsg)
                         // Optionally add stack trace details
-                    } else if (result != null) {
+                    } else {
                         when (val evalResult = result!!) {
                             is ResultWithDiagnostics.Failure -> {
                                 val failMsg = "Script evaluation failed:"
@@ -513,11 +520,23 @@ object RevancedFingerprintPluginUi {
                                             ScriptEvaluation.LOG.error { "Actual value classloader: ${actualValue.javaClass.classLoader}" }
                                             ScriptEvaluation.LOG.error { "Expected Fingerprint classloader: ${Fingerprint::class.java.classLoader}" }
                                         } else {
-                                            val resolvedFingerprint = actualValue
-                                            val msg = "Fingerprint: $resolvedFingerprint"
-                                            outputBuilder.appendLine(msg)
-                                            val searchResult = RevancedResolver.searchFingerprint(resolvedFingerprint)
+                                            ScriptEvaluation.LOG.info { "Index: $navigationIndex" }
+                                            ScriptEvaluation.LOG.info { "Current set: $matchedMethods" }
+                                            ScriptEvaluation.LOG.info { "Fingerprint: $actualValue" }
+                                            outputBuilder.appendLine("Fingerprint: $actualValue")
+                                            actualValue.ignoreSet = matchedMethods.take(navigationIndex).toSet()
+                                            ScriptEvaluation.LOG.info { "Applied ignore set: ${actualValue.ignoreSet}" }
+
+                                            val searchResult = if (navigationIndex in matchedMethods.indices) {
+                                                ScriptEvaluation.LOG.info { "Index $navigationIndex found in map" }
+                                                matchedMethods.elementAt(navigationIndex)
+                                            } else {
+                                                ScriptEvaluation.LOG.info { "Not found in map: searching" }
+                                                RevancedResolver.searchFingerprint(actualValue)
+                                            }
+                                            ScriptEvaluation.LOG.info { "Search result $searchResult" }
                                             if (searchResult != null) {
+                                                matchedMethods.add(searchResult)
                                                 outputBuilder.appendLine("Fingerprint found in APK: ${searchResult.definingClass}")
                                                 outputBuilder.appendLine(
                                                     "originalFullName: ${
@@ -561,24 +580,21 @@ object RevancedFingerprintPluginUi {
                                                         }
                                                     }
                                                     resultComponents.add(jumpButton)
+                                                    nextButton.isEnabled = true
                                                 }
-
-
                                             } else {
-                                                val msg = "Fingerprint not found in the APK."
+                                                val msg =
+                                                    if (navigationIndex == 0) "Fingerprint not found in the APK." else "No more results found."
                                                 resultComponents.add(createWrappedTextArea(msg))
                                                 outputBuilder.appendLine(msg)
                                                 ScriptEvaluation.LOG.warn { msg }
+                                                nextButton.isEnabled = false
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                    } else {
-                        val msg = "Evaluation did not produce a result."
-                        resultComponents.add(createWrappedTextArea(msg))
-                        outputBuilder.appendLine(msg)
                     }
 
                     // Switch back to the Event Dispatch Thread (EDT) to update the UI
@@ -592,13 +608,13 @@ object RevancedFingerprintPluginUi {
                                     it
                                 )
                             }
-//                            resultContentBox.add(createWrappedTextArea(outputBuilder.toString()))
                         }
                         ScriptEvaluation.LOG.info { "Script evaluation output:\n ${outputBuilder.toString()}" }
 
 
                         resultLabel.text = "Executed in ${executionTime.inWholeMilliseconds.milliseconds}"
                         runButton.isEnabled = true
+                        previousButton.isEnabled = navigationIndex > 0
                         // Ensure layout updates are processed
                         resultContentBox.revalidate()
                         resultContentBox.repaint()
@@ -608,28 +624,30 @@ object RevancedFingerprintPluginUi {
                     }
                 }
             }
+
+            runButton.addActionListener {
+                matchedMethods = linkedSetOf()
+                navigationIndex = 0
+                onButtonClick("Evaluating...")
+            }
+
+            nextButton.addActionListener {
+                navigationIndex++
+                onButtonClick("Searching next...")
+            }
+
+            previousButton.addActionListener {
+                navigationIndex--
+                onButtonClick("Searching previous...")
+            }
+
+
             frame.contentPane = mainPanel
             frame.isVisible = true
         }
-
-
     }
 
-    fun dumpClasses() {
-        context.decompiler.getRoot().getClasses().forEach {
-            val classInfo = it.classInfo
-            LOG.info { "package: ${classInfo.`package`}" }
-            LOG.info { "isInner: ${classInfo.isInner}" }
-            LOG.info { "type: ${classInfo.type}" }
-            LOG.info { "parentClass: ${classInfo.parentClass}" }
-            LOG.info { "fullName: ${classInfo.fullName}" }
-            LOG.info { "rawName: ${classInfo.rawName}" }
-            LOG.info { "aliasFullName: ${classInfo.aliasFullName}" }
-
-        }
-    }
-
-    fun createWrappedTextArea(text: String): JTextArea {
+    private fun createWrappedTextArea(text: String): JTextArea {
         val textArea = JTextArea(text)
         textArea.lineWrap = true
         textArea.wrapStyleWord = true
@@ -638,160 +656,6 @@ object RevancedFingerprintPluginUi {
         textArea.alignmentY = Component.TOP_ALIGNMENT // Align top
         textArea.setBorder(BorderFactory.createEmptyBorder(4, 2, 4, 2)) // Add padding
         return textArea
-    }
-
-    fun oldStyle() {
-        // Ensure UI updates happen on the Event Dispatch Thread
-        SwingUtilities.invokeLater {
-            // Create the main frame (window)
-            val frame = JFrame("Revanced Script Evaluator")
-            frame.setSize(800, 600) // Increased size slightly
-            // Set location relative to the main JADX window if possible, otherwise center on screen
-
-            // --- Output Panel Setup ---
-            val outputPanel = JPanel()
-            outputPanel.layout = BoxLayout(outputPanel, BoxLayout.Y_AXIS) // Vertical layout
-            outputPanel.border = BorderFactory.createEmptyBorder(10, 10, 10, 10) // Add padding
-
-            val statusLabel = JLabel("Output will be shown here:")
-            statusLabel.alignmentX = Component.LEFT_ALIGNMENT // Align left
-            outputPanel.add(statusLabel)
-
-            // Results Area (Bottom, Scrollable)
-            val resultsTextArea = JTextArea()
-            resultsTextArea.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-            resultsTextArea.isEditable = false // Make read-only
-            resultsTextArea.lineWrap = true // Enable line wrapping
-            resultsTextArea.wrapStyleWord = true // Wrap at word boundaries
-            val resultsScrollPane = JScrollPane(resultsTextArea)
-            resultsScrollPane.alignmentX = Component.LEFT_ALIGNMENT // Align left
-            // Make the results area take available vertical space (might need tweaking depending on container)
-            // resultsScrollPane.preferredSize = Dimension(200, Int.MAX_VALUE) // Adjust width as needed
-            // Set preferred width to 50%
-
-
-            outputPanel.add(resultsScrollPane)
-            // --- End Output Panel Setup ---
-
-
-            // Create the text area for the script
-            val scriptTextArea = JTextArea()
-            val scriptScrollPane = JScrollPane(scriptTextArea) // Add scroll bars
-            scriptScrollPane.setBorder(
-                BorderFactory.createCompoundBorder(
-                    scriptScrollPane.border,
-                    BorderFactory.createEmptyBorder(5, 5, 5, 5)
-                )
-            );
-            scriptScrollPane.minimumSize = Dimension(300, 0) // Set minimum width
-
-            // Create the evaluate button
-            val evaluateButton = JButton("Evaluate Script")
-            evaluateButton.addActionListener { event: ActionEvent? ->
-                // Disable UI elements
-                evaluateButton.isEnabled = false
-                scriptTextArea.isEnabled = false
-                statusLabel.text = "Evaluating..."
-                resultsTextArea.text = "" // Clear previous results
-
-                val script = scriptTextArea.text
-                LOG.info { "Evaluating script: $script" }
-                var result: ResultWithDiagnostics<EvaluationResult>? = null
-                var evaluationError: Throwable? = null
-                val executionTime = measureTime {
-                    result = ScriptEvaluation.rawEvaluate(script)
-                }
-                // Always update status and re-enable UI, regardless of success/failure/exception
-                statusLabel.text = "Executed in ${executionTime.inWholeMilliseconds.milliseconds}"
-                evaluateButton.isEnabled = true
-                scriptTextArea.isEnabled = true
-
-
-                val outputBuilder = StringBuilder()
-
-                if (evaluationError != null) {
-                    outputBuilder.appendLine("Evaluation failed with exception: ${evaluationError.message}")
-                    // Optionally add stack trace or more details
-                } else if (result != null) {
-                    when (val evalResult = result!!) {
-                        is ResultWithDiagnostics.Failure -> {
-                            ScriptEvaluation.LOG.error { "Script evaluation failed:" }
-                            outputBuilder.appendLine("Script evaluation failed:")
-                            evalResult.reports.forEach { report ->
-                                val message = "  ${report.severity}: ${report.message}"
-                                ScriptEvaluation.LOG.error { message }
-                                outputBuilder.appendLine(message)
-                                report.exception?.let {
-                                    ScriptEvaluation.LOG.error(it) { "  Exception details:" }
-                                    // Optionally add exception details to outputBuilder
-                                }
-                            }
-                        }
-
-                        is ResultWithDiagnostics.Success -> {
-                            when (val returnValue = evalResult.value.returnValue) {
-                                ResultValue.NotEvaluated -> {
-                                    outputBuilder.appendLine("Script was not evaluated.")
-                                }
-
-                                is ResultValue.Error -> {
-                                    ScriptEvaluation.LOG.error(returnValue.error) { "Script execution error:" }
-                                    outputBuilder.appendLine("Script execution error: ${returnValue.error}")
-                                    // Optionally add stack trace
-                                }
-
-                                is ResultValue.Unit -> {
-                                    ScriptEvaluation.LOG.warn { "Script did not produce a value result. Result type: ${returnValue::class.simpleName}" }
-                                    outputBuilder.appendLine("Script did not produce a value result. Result type: ${returnValue::class.simpleName}")
-                                }
-
-                                is ResultValue.Value -> {
-                                    ScriptEvaluation.LOG.info { "Script execution result: $returnValue" }
-                                    val actualValue = returnValue.value
-                                    if (actualValue == null) {
-                                        ScriptEvaluation.LOG.warn { "Script returned null." }
-                                        outputBuilder.appendLine("Script returned null.")
-                                    } else if (actualValue !is Fingerprint) {
-                                        ScriptEvaluation.LOG.error { "Script returned unexpected type: ${returnValue.type}" }
-                                        ScriptEvaluation.LOG.error { "Actual value classloader: ${actualValue.javaClass.classLoader}" }
-                                        ScriptEvaluation.LOG.error { "Expected Fingerprint classloader: ${Fingerprint::class.java.classLoader}" }
-                                        outputBuilder.appendLine("Script returned unexpected type: ${returnValue.type}")
-                                    } else {
-                                        val resolvedFingerprint = actualValue
-                                        outputBuilder.appendLine("Fingerprint: $resolvedFingerprint")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    outputBuilder.appendLine("Evaluation did not produce a result.")
-                }
-
-
-                resultsTextArea.text = outputBuilder.toString().trim()
-                resultsTextArea.caretPosition = 0 // Scroll to top
-                // No need to call revalidate/repaint explicitly here,
-                // setting text on Swing components usually handles it.
-                LOG.info { "Script evaluation UI updated." }
-            }
-
-            val buttonPanel = JPanel()
-            buttonPanel.add(evaluateButton)
-
-            // Add components to the frame's content pane
-            // Use a SplitPane for resizable areas if desired, or adjust BorderLayout
-            frame.contentPane.layout = BorderLayout() // Ensure main layout is BorderLayout
-            frame.contentPane.add(scriptScrollPane, BorderLayout.CENTER) // Script input takes center
-            frame.contentPane.add(buttonPanel, BorderLayout.SOUTH)      // Button at the bottom
-            frame.contentPane.add(outputPanel, BorderLayout.EAST)       // Output on the right
-
-            // Set default close operation (dispose frame, don't exit application)
-            frame.defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
-
-            // Make the window visible
-            frame.isVisible = true
-        }
     }
 
     fun inlineSvgIcon(svg: String): FlatSVGIcon {
