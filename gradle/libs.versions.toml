@@ -17,7 +17,7 @@ flatlaf = "3.6"
 rsyntaxtextarea = "3.6.0"
 autocomplete = "3.3.2"
 
-revanced-patcher = "21.0.0"
+jadx-plugin-revanced-patcher = "1.1.1"
 multidexlib2 = "3.0.3.r3"
 smali = "3.0.5"
 xpp3 = "1.1.4c"
@@ -46,7 +46,7 @@ logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "lo
 jadx-core = { module = "io.github.skylot:jadx-core", version.ref = "jadx" }
 jadx-gui = { module = "io.github.skylot:jadx-gui", version.ref = "jadx" }
 
-revanced-patcher = { module = "app.revanced:revanced-patcher", version.ref = "revanced-patcher" }
+jadx-plugin-revanced-patcher = { module = " app.brosssh:jadx-plugin-revanced-patcher", version.ref = "jadx-plugin-revanced-patcher" }
 smali = { module = "com.android.tools.smali:smali", version.ref = "smali" }
 multidexlib2 = { module = "app.revanced:multidexlib2", version.ref = "multidexlib2" }
 xpp3 = { module = "xpp3:xpp3", version.ref = "xpp3" }
@@ -58,7 +58,7 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 [bundles]
 scripting = ["kotlin-scripting-jvm", "kotlin-scripting-common", "kotlin-scripting-jvm-host", "kotlin-scripting-dependencies"]
 logging = ["kotlin-logging-jvm", "slf4j-api", "logback-classic"]
-revanced = ["smali", "multidexlib2", "revanced-patcher"]
+revanced = ["smali", "multidexlib2", "jadx-plugin-revanced-patcher"]
 jadx = ["jadx-core", "jadx-gui"]
 
 [plugins]

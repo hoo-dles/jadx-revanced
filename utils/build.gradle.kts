@@ -38,26 +38,28 @@ java {
     targetCompatibility = JavaVersion.VERSION_11
 }
 
-tasks.shadowJar {
-//    minimize {
-//        exclude(dependency("org.bouncycastle:.*"))
-//        exclude(dependency("app.revanced:revanced-patcher"))
-//    }
-    archiveBaseName.set("utils-shadow")
-    archiveClassifier.set("")
-    archiveVersion.set("")
-    mergeServiceFiles()
-}
+tasks {
+    shadowJar {
+        //    minimize {
+        //        exclude(dependency("org.bouncycastle:.*"))
+        //        exclude(dependency("app.revanced:revanced-patcher"))
+        //    }
+        archiveBaseName.set("utils-shadow")
+        archiveClassifier.set("")
+        archiveVersion.set("")
+        mergeServiceFiles()
+    }
 
-tasks.register<Copy>("copyJarToApp") {
-    dependsOn(tasks.named("shadowJar"))
+    register<Copy>("copyJarToApp") {
+        dependsOn(shadowJar)
 
-    from("${layout.buildDirectory}/libs/utils-shadow.jar")
-    //Module app /libs
-    into("${project.rootDir}/app/libs")
+        from("${layout.buildDirectory}/libs/utils-shadow.jar")
+        //Module app /libs
+        into("${project.rootDir}/app/libs")
 
-}
+    }
 
-tasks.named("build") {
-    finalizedBy("copyJarToApp")
+    named("build") {
+        finalizedBy("copyJarToApp")
+    }
 }
