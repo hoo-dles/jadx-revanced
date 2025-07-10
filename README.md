@@ -1,16 +1,11 @@
 # jadx-revanced
-
-Run ./gradlew plugin:dist to build the plugin then in app/build/dist you find the jar
-
-You need the github token for accessing the revanced-patcher repo
-
-Also sometimes shadowJar decides to not bundle everything and the plugin randomly fails for missing classes or methods, compile size should be around 100Mb
-
-The utils module has nothing its just testing
-
-To uninstall i believe jadx is kinda bugged, you have to uninstall the plugin from UI and then find the folder where jadx installs plugins and delete the jar there in windows is %appdata%\Roaming\skylot\jadx\config\plugins\installed
+Updated codebase to support JADX 1.5.2. All credit goes to [valonsdev](https://github.com/valonsodev/jadx-revanced) for the original work.
 
 
-TODO: right click button to copy fingerprint
+## Building 
+> [!IMPORTANT]
+> A GitHub access token for accessing the `revanced-patcher` repo
 
-TODO: Fix jumping to nested classes not working, this is a jadx issue tho, might need to find a better way to translate short 
+1. Clone this repository.
+2. Run `./gradlew plugin:dist` to build the plugin (output is placed in `plugin/build/dist`).
+3. Install plugin via the JADX _Manage plugins_ interface.
