@@ -12,7 +12,7 @@ kotlin-logging-jvm = "7.0.5"
 slf4j = "2.0.17"
 logback = "1.5.18"
 
-jadx = "1.5.1"
+jadx = "1.5.2"
 flatlaf = "3.6"
 rsyntaxtextarea = "3.6.0"
 autocomplete = "3.3.2"

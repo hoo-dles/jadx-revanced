@@ -1,6 +1,6 @@
-# revanced-script
+# jadx-revanced
 
-Run ./gradlew app:dist to build the plugin then in app/build/dist you find the jar
+Run ./gradlew plugin:dist to build the plugin then in app/build/dist you find the jar
 
 You need the github token for accessing the revanced-patcher repo
 
